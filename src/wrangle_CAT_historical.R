@@ -9,10 +9,18 @@ lapply(
   c("gtfsr",
     "sf",
     "magrittr",
-    "tidyverse"),
+    "tidyverse",
+    "leaflet"),
   require,
   c = T
 )
+
+# some old GTFS heler functions
+source("https://gist.githubusercontent.com/nathancday/d50afccb762174d402f54486d3d328b6/raw/7e62f39efceb208b1a62c85c1cc72522a9ccb035/gtfs_sf.R")
+
+scale_colour_discrete <- function(...) {
+  ggsci::scale_color_d3("category20", ...)
+}
 
 # In ----------------------------------------------------------------------
 
@@ -73,90 +81,52 @@ route_counts <- dat %>%
 # GTFS --------------------------------------------------------------------
 
 cat <- gtfsr::import_gtfs("https://github.com/Smart-Cville/CID-2018-Regional-Transit-Challenge/blob/b6c714ec190f8843d6aa154fc74ed7be3bd5307f/data/2017_08_CharlottesvilleAreaTransit.zip?raw=true")
+cat %>% gtfsr::map_gtfs(., route_ids = .$routes_df$route_id,
+                 route_colors = paste0("#", .$routes_df$route_color))
 
-gtfs_routes_sf <- function(gtfs) {
-  
-  ## gather key-values first
-  
-  # trips_df has route_id:shape_id
-  shape_key <- gtfs$trips_df %>%
-    select(route_id, shape_id) %>%
-    unique()
-  
-  # routes_df has route_id:route_name
-  route_key <- gtfs$routes_df %>%
-    select(route_id, route_short_name) %>%
-    mutate(route_short_name = paste("route", route_short_name)) %>%
-    inner_join(shape_key)
-  
-  # check for colors :)
-  if ( !is.null(gtfs$routes_df$route_color) ) { # extract if they exist
-    route_key %<>% inner_join(select(gtfs$routes_df, route_color, route_id) )
-  }
-  else { # planB: build a pal from my favorite pallette 'd3'
-    route_key %<>% mutate(route_color = rep(ggsci::pal_d3()(10),
-                                            length.out = nrow(route_key)))
-  }
-  
-  ## build the sf object
-  
-  # exctract lon/lat values as matrix to build linestrings for each "shape_id"
-  sfc <- gtfs$shapes_df %>% # long data frame
-    split(.$shape_id) %>% # list of shorted data framee, one per shape
-    map(~ select(., shape_pt_lon, shape_pt_lat) %>% # order maters, lon-1st lat-2nd
-          as.matrix %>% # coherce for st_linestrings happiness
-          st_linestring) %>%
-    st_sfc(crs = 4326) # bundle all shapes into a collection w/ projection
-  
-  # add collection on and convert to sf
-  unique(gtfs$shapes_df$shape_id) %>%
-    sort() %>% # sort to match with names(sfc); split()'s factor-cohercion alpha sorts
-    st_sf(shape_id = ., geometry = sfc) %>%
-    inner_join(route_key)
+# extract routes and stops
+cat_routes <- gtfs_routes_sf(cat) %>%
+  group_by(route_short_name, route_color) %>%
+  summarise(geometry = st_combine(geometry))
 
-}
-
-cat_routes <- gtfs_routes_sf(cat)
+cat_stops <- gtfs_stops_sf(cat) %>% 
+  st_set_crs(st_crs(cat_routes))
 
 # join-in counts
-
-cat_routes %>% inner_join(route_counts)
-
-gtfs_stops_sf <- function(gtfs) {
-  shape_key <- gtfs$trips_df %>%
-    select(trip_id, route_id, shape_id) %>%
-    unique()
-  
-  # stop_times_df also has stop sequence and arrive/depart time for specific stops
-  stop_key <- gtfs$stop_times_df %>%
-    select(trip_id, stop_id) %>%
-    unique() %>%
-    inner_join(shape_key) %>% # one stop is on multiple routes
-    # need to pair down
-    arrange(route_id) %>% # use route_id as tiebreaker (for now)
-    group_by(stop_id) %>% # group_by() to stop_id 
-    slice(1) # to slice() out the first row
-  
-  if ( !is.null(gtfs$routes_df$route_color) ) {
-    stop_key %<>% inner_join(select(gtfs$routes_df, route_color, route_id)) }
-  else {stop_key %<>% mutate(route_color = rep(ggsci::pal_d3()(10), length.out = nrow(route_key))) }
-  
-  stops_sfc <- gtfs$stops_df %>%
-    split(.$stop_id) %>%
-    map(~select(., stop_lon, stop_lat) %>%
-          unlist() %>%
-          st_point() ) %>% # point instead of linestring
-    st_sfc()
-  
-  st_sf(stop_key, geometry = stops_sfc) %>%
-    inner_join(gtfs$stops_df)
-}
-cat_stops <- gtfs_stops_sf(cat)
-
-# join stops to counts
+cat_routes %<>% inner_join(route_counts)
 cat_stops %<>% inner_join(select(stop_counts, -lng, -lat))
 
 ggplot(cat_stops) +
-  geom_sf(aes(color = route_id, size = n), shape = 1) +
-  # geom_sf(data = cat_routes)
-  ggsci::scale_color_d3("category20")
+  geom_sf(aes(color = route_id, size = n), shape = 1)
+
+ggplot(cat_routes) +
+  geom_sf(aes(color = route_short_name, size = n))
+
+ggplot(cat_stops) +
+  geom_sf(data = cat_routes, aes(color = alpha(route_id, .2), size = n)) +
+  geom_sf(aes(color = route_id, size = n), shape = 1)
+
+ggplot(cat_stops) +
+  geom_sf(data = cvl_geo, show.legend = F) +
+  geom_sf(aes(color = route_id, size = n), alpha = .5)
+
+ggplot(cat_stops) +
+  geom_sf(data = cvl_geo, show.legend = F) +
+  geom_sf(data = cat_routes, aes(color = alpha(route_id, .2), size = n))
+
+plot(cat_routes)
+
+cat_routes2 <- get_routes_sldf(cat, cat$routes_df$route_id, NULL, NULL, .5,
+                              unique(cat_routes$route_color))
+
+leaflet(cat_stops) %>% 
+  addCircleMarkers()
+
+# names(cat_routes$geometry) <- NULL
+
+cat_routes$n <- cat_routes$n /max(cat_routes$n) * 10
+
+leaflet(cat_routes) %>% 
+  addTiles() %>% 
+  addPolylines(color = ~paste0("#", route_color),
+               weight = 10)

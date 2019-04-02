@@ -17,7 +17,7 @@ lapply(
 # In ----------------------------------------------------------------------
 
 # map data
-cvl_geo <- get_acs("tract", vars[1],
+cvl_geo <- get_acs("tract", "B00001_001",
                    county = "Charlottesville", state = "VA",
                    geometry = T) %>%
   select(GEOID, geometry)
