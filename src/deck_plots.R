@@ -127,27 +127,33 @@ cowplot::plot_grid(key_map, trend_plot, rel_widths = c(.3, .6))
 # alpha'd to show show bigs
 
 cvl_geo %<>%
-  mutate(alpha2 = case_when(grepl("(900)|(502)|(201)|(402)", GEOID) ~ 1, 
-                           TRUE ~ .8))
+  mutate(color = case_when(grepl("(900)|(502)|(201)|(402)", GEOID) ~ GEOID, 
+                           TRUE ~ "GREY"))
 
 key_map <- ggplot(cvl_geo) +
-  geom_sf(aes(fill = GEOID, alpha = alpha2, stroke = alpha), show.legend = F) +
-  ggsci::scale_fill_d3("category20") +
+  geom_sf(aes(fill = color, stroke = alpha), show.legend = F) +
+  scale_fill_manual(values = d3_pal2) +
   scale_alpha(range = c(.25, 1)) +
   coord_sf(datum = NA)
 
-cvl %<>%
-  mutate(alpha2 = case_when(grepl(""(900)|(502)|(201)|(402)"", GEOID) ~ 1, 
-                           TRUE ~ .8))
+key_map
 
+cvl %<>%
+  mutate(color = case_when(grepl("(900)|(502)|(201)|(402)", GEOID) ~ GEOID, 
+                           TRUE ~ "GREY"))
+
+d3_pal2 <- ggsci::pal_d3("category20")(12) %>%
+  set_names(cvl_geo$GEOID)
 
 trend_plot <- ggplot(cvl, aes(last_year, estimate, color = GEOID, group = GEOID)) +
-  geom_path(aes(alpha = alpha2), size = 2, show.legend = F) +
-  ggsci::scale_color_d3("category20") +
+  geom_path(aes(color = color), size = 2, show.legend = F) +
+  scale_color_manual(values = d3_pal2) +
   scale_y_continuous(labels = scales::dollar) +
   scale_alpha(range = c(.25, 1)) +
   labs(y = "Median Rent",
        x = NULL)
+
+trend_plot
 
 cowplot::plot_grid(key_map, trend_plot, rel_widths = c(.3, .6))
 
@@ -386,8 +392,9 @@ commute_routes %>%
   coord_flip() +
   scale_fill_manual(values = pal) +
   scale_y_continuous(labels = function(breaks) breaks / 1000) +
-  theme(legend.position = "none") +
-  labs(y = "Thousands riders",
+  theme(legend.position = "none",
+        axis.text = element_text(size = rel(1.2))) +
+  labs(y = "Thousand riders",
        x = NULL,
        caption = "M-F 7a-9a")
 
@@ -506,12 +513,14 @@ leaflet(shapes_by_stops) %>%
 shapes_by_stops %>%
   ggplot(aes(x = Assessment, y = total_wt, color = total_wt)) +
   geom_point(size = 3, alpha = .3) +
-  geom_vline(xintercept = 4.5e5, linetype = 2) +
-  geom_hline(yintercept = 1, linetype = 2) +
+  geom_rect(xmin = 0, xmax = 1e6, ymin = -.5, ymax = 1,
+            alpha = .01, aes(color = NULL), fill = "lightgrey") +
+  geom_rect(xmin = 4e5, xmax = 1.02e6, ymin = -.5, ymax = 5.5,
+            alpha = .01, aes(color = NULL), fill = "lightgrey") +
   scale_x_continuous(labels = scales::dollar) +
   scale_color_viridis_c() +
   labs(x = NULL,
-       y = "CAT weight") +
+       y = "Transit score") +
   theme(legend.position = "none",
         axis.text = element_text(size = rel(1.1)))
 
